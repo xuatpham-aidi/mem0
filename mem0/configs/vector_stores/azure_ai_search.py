@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -8,6 +8,10 @@ class AzureAISearchConfig(BaseModel):
     service_name: str = Field(None, description="Azure AI Search service name")
     api_key: str = Field(None, description="API key for the Azure AI Search service")
     embedding_model_dims: int = Field(1536, description="Dimension of the embedding vector")
+    payload_filter_config: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Configuration for payload fields to enable filtering capabilities in .",
+    )
     compression_type: Optional[str] = Field(
         None, description="Type of vector compression to use. Options: 'scalar', 'binary', or None"
     )

@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -16,6 +16,7 @@ try:
     from azure.search.documents.indexes import SearchIndexClient
     from azure.search.documents.indexes.models import (
         BinaryQuantizationCompression,
+        ComplexField,
         HnswAlgorithmConfiguration,
         ScalarQuantizationCompression,
         SearchField,
@@ -47,6 +48,7 @@ class AzureAISearch(VectorStoreBase):
         collection_name,
         api_key,
         embedding_model_dims,
+        payload_filter_config: Optional[List[Dict[str, Any]]] = None,
         compression_type: Optional[str] = None,
         use_float16: bool = False,
         hybrid_search: bool = False,
@@ -72,6 +74,7 @@ class AzureAISearch(VectorStoreBase):
         self.index_name = collection_name
         self.collection_name = collection_name
         self.embedding_model_dims = embedding_model_dims
+        self.payload_filter_config = payload_filter_config
         # If compression_type is None, treat it as "none".
         self.compression_type = (compression_type or "none").lower()
         self.use_float16 = use_float16
@@ -132,6 +135,32 @@ class AzureAISearch(VectorStoreBase):
                 )
             ]
         # If no compression is desired, compression_configurations remains empty.
+        str_2_type = {
+            "string": SearchFieldDataType.String,
+            "int": SearchFieldDataType.Int32,
+            "double": SearchFieldDataType.Double,
+            "boolean": SearchFieldDataType.Boolean,
+            "collection(string)": SearchFieldDataType.Collection(SearchFieldDataType.String),
+            "collection(int)": SearchFieldDataType.Collection(SearchFieldDataType.Int32),
+            "collection(double)": SearchFieldDataType.Collection(SearchFieldDataType.Double),
+            "collection(boolean)": SearchFieldDataType.Collection(SearchFieldDataType.Boolean),
+        }
+
+        payload_fields = []
+        if self.payload_filter_config:
+            for field_config in self.payload_filter_config:
+                name = field_config.get("name")
+                type_str = field_config.get("type", "String").lower()
+                filterable = field_config.get("filterable", False)
+                searchable = field_config.get("searchable", False)
+                if type_str in str_2_type:
+                    field_type = str_2_type[type_str]
+                else:
+                    continue  # Skip unsupported types
+                payload_fields.append(
+                    SimpleField(name=name, type=field_type, filterable=filterable)
+                )
+
         fields = [
             SimpleField(name="id", type=SearchFieldDataType.String, key=True),
             SimpleField(name="user_id", type=SearchFieldDataType.String, filterable=True),
@@ -145,6 +174,7 @@ class AzureAISearch(VectorStoreBase):
                 vector_search_profile_name="my-vector-config",
             ),
             SearchField(name="payload", type=SearchFieldDataType.String, searchable=True),
+            ComplexField(name="metadata", fields=payload_fields)
         ]
 
         vector_search = VectorSearch(
@@ -162,11 +192,18 @@ class AzureAISearch(VectorStoreBase):
         self.index_client.create_or_update_index(index)
 
     def _generate_document(self, vector, payload, id):
-        document = {"id": id, "vector": vector, "payload": json.dumps(payload)}
+        document = {"id": id, "vector": vector, "payload": json.dumps(payload), "metadata": {}}
         # Extract additional fields if they exist.
         for field in ["user_id", "run_id", "agent_id"]:
             if field in payload:
                 document[field] = payload[field]
+
+        # Add filtered metadata fields if configured.
+        for field in self.payload_filter_config:
+            field_name = field.get("name")
+            if field_name and field_name in payload:
+                document["metadata"][field_name] = payload[field_name]
+
         return document
 
     # Note: Explicit "insert" calls may later be decoupled from memory management decisions.
@@ -194,13 +231,24 @@ class AzureAISearch(VectorStoreBase):
 
     def _build_filter_expression(self, filters):
         filter_conditions = []
+        field_types = {field.get("name"): field.get("type") for field in self.payload_filter_config}
         for key, value in filters.items():
             safe_key = self._sanitize_key(key)
+            if safe_key in field_types:
+                safe_key = f"metadata/{safe_key}"
             if isinstance(value, str):
                 safe_value = value.replace("'", "''")
-                condition = f"{safe_key} eq '{safe_value}'"
+                if field_types.get(key, "").lower().startswith("collection(string)"):
+                    # condition = f"{safe_key}/any(t: t eq '{safe_value}')"
+                    condition = f"{safe_key}/any(t: search.in(t, '{safe_value}'))"
+                else:
+                    condition = f"{safe_key} eq '{safe_value}'"
             else:
-                condition = f"{safe_key} eq {value}"
+                if field_types.get(key, "").lower().startswith("collection(string)"):
+                    # condition = f"{safe_key}/any(t: t eq {value})"
+                    condition = f"{safe_key}/any(t: search.in(t, {value}))"
+                else:
+                    condition = f"{safe_key} eq {value}"
             filter_conditions.append(condition)
         filter_expression = " and ".join(filter_conditions)
         return filter_expression
@@ -269,7 +317,7 @@ class AzureAISearch(VectorStoreBase):
             vector (List[float], optional): Updated vector.
             payload (Dict, optional): Updated payload.
         """
-        document = {"id": vector_id}
+        document = {"id": vector_id, "metadata": {}}
         if vector:
             document["vector"] = vector
         if payload:
@@ -277,6 +325,10 @@ class AzureAISearch(VectorStoreBase):
             document["payload"] = json_payload
             for field in ["user_id", "run_id", "agent_id"]:
                 document[field] = payload.get(field)
+            for field in self.payload_filter_config:
+                field_name = field.get("name")
+                if field_name and field_name in payload:
+                    document["metadata"][field_name] = payload[field_name]
         response = self.search_client.merge_or_upload_documents(documents=[document])
         for doc in response:
             if not hasattr(doc, "status_code") and doc.get("status_code") != 200:
