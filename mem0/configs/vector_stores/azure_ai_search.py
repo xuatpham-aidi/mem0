@@ -8,7 +8,7 @@ class AzureAISearchConfig(BaseModel):
     service_name: str = Field(None, description="Azure AI Search service name")
     api_key: str = Field(None, description="API key for the Azure AI Search service")
     embedding_model_dims: int = Field(1536, description="Dimension of the embedding vector")
-    payload_filter_config: Optional[List[Dict[str, Any]]] = Field(
+    payload_filter_config: Optional[Dict[str, Dict[str, Any]]] = Field(
         default=None,
         description="Configuration for payload fields to enable filtering capabilities in .",
     )

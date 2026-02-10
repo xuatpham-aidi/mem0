@@ -48,7 +48,7 @@ class AzureAISearch(VectorStoreBase):
         collection_name,
         api_key,
         embedding_model_dims,
-        payload_filter_config: Optional[List[Dict[str, Any]]] = None,
+        payload_filter_config: Optional[Dict[str, Dict[str, Any]]] = None,
         compression_type: Optional[str] = None,
         use_float16: bool = False,
         hybrid_search: bool = False,
@@ -148,18 +148,37 @@ class AzureAISearch(VectorStoreBase):
 
         payload_fields = []
         if self.payload_filter_config:
-            for field_config in self.payload_filter_config:
-                name = field_config.get("name")
-                type_str = field_config.get("type", "String").lower()
-                filterable = field_config.get("filterable", False)
-                searchable = field_config.get("searchable", False)
-                if type_str in str_2_type:
-                    field_type = str_2_type[type_str]
+            # for field_config in self.payload_filter_config:
+            #     name = field_config.get("name")
+            #     type_str = field_config.get("type", "String").lower()
+            #     filterable = field_config.get("filterable", False)
+            #     searchable = field_config.get("searchable", False)
+            #     if type_str in str_2_type:
+            #         field_type = str_2_type[type_str]
+            #     else:
+            #         continue  # Skip unsupported types
+            #     payload_fields.append(
+            #         SimpleField(name=name, type=field_type, filterable=filterable)
+            #     )
+
+            for field_name, field_config in self.payload_filter_config.items():
+                if field_config.get("searchable", False):
+                    payload_fields.append(
+                        SearchField(
+                            name=field_name,
+                            type=str_2_type.get(field_config.get("type", "string").lower(), SearchFieldDataType.String),
+                            filterable=field_config.get("filterable", False),
+                            searchable=True,
+                        )
+                    )
                 else:
-                    continue  # Skip unsupported types
-                payload_fields.append(
-                    SimpleField(name=name, type=field_type, filterable=filterable)
-                )
+                    payload_fields.append(
+                        SimpleField(
+                            name=field_name,
+                            type=str_2_type.get(field_config.get("type", "string").lower(), SearchFieldDataType.String),
+                            filterable=field_config.get("filterable", False),
+                        )
+                    )
 
         fields = [
             SimpleField(name="id", type=SearchFieldDataType.String, key=True),
@@ -199,10 +218,14 @@ class AzureAISearch(VectorStoreBase):
                 document[field] = payload[field]
 
         # Add filtered metadata fields if configured.
-        for field in self.payload_filter_config:
-            field_name = field.get("name")
-            if field_name and field_name in payload:
+        for field_name, _ in self.payload_filter_config.items():
+            if field_name in payload:
                 document["metadata"][field_name] = payload[field_name]
+
+        # for field in self.payload_filter_config:
+        #     field_name = field.get("name")
+        #     if field_name and field_name in payload:
+        #         document["metadata"][field_name] = payload[field_name]
 
         return document
 
@@ -231,7 +254,8 @@ class AzureAISearch(VectorStoreBase):
 
     def _build_filter_expression(self, filters):
         filter_conditions = []
-        field_types = {field.get("name"): field.get("type") for field in self.payload_filter_config}
+        # field_types = {field.get("name"): field.get("type") for field in self.payload_filter_config}
+        field_types = {field_name: field_config.get("type", "string").lower() for field_name, field_config in self.payload_filter_config.items()}
         for key, value in filters.items():
             safe_key = self._sanitize_key(key)
             if safe_key in field_types:
@@ -325,8 +349,7 @@ class AzureAISearch(VectorStoreBase):
             document["payload"] = json_payload
             for field in ["user_id", "run_id", "agent_id"]:
                 document[field] = payload.get(field)
-            for field in self.payload_filter_config:
-                field_name = field.get("name")
+            for field_name, field_config in self.payload_filter_config.items():
                 if field_name and field_name in payload:
                     document["metadata"][field_name] = payload[field_name]
         response = self.search_client.merge_or_upload_documents(documents=[document])
