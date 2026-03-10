@@ -3,6 +3,8 @@ from typing import Dict, List, Optional, Union
 
 from mem0.configs.llms.base import BaseLlmConfig
 
+from langchain_core.callbacks import BaseCallbackHandler
+
 
 class LLMBase(ABC):
     """
@@ -96,7 +98,7 @@ class LLMBase(ABC):
 
     @abstractmethod
     def generate_response(
-        self, messages: List[Dict[str, str]], tools: Optional[List[Dict]] = None, tool_choice: str = "auto", **kwargs
+        self, messages: List[Dict[str, str]], tools: Optional[List[Dict]] = None, tool_choice: str = "auto", callbacks: Optional[List[BaseCallbackHandler]] = None, **kwargs
     ):
         """
         Generate a response based on the given messages.
@@ -105,6 +107,7 @@ class LLMBase(ABC):
             messages (list): List of message dicts containing 'role' and 'content'.
             tools (list, optional): List of tools that the model can call. Defaults to None.
             tool_choice (str, optional): Tool choice method. Defaults to "auto".
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
             **kwargs: Additional provider-specific parameters.
 
         Returns:

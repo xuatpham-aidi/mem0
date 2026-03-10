@@ -9,10 +9,12 @@ import uuid
 import warnings
 from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import pytz
 from pydantic import ValidationError
+
+from langchain_core.callbacks import BaseCallbackHandler
 
 from mem0.configs.base import MemoryConfig, MemoryItem
 from mem0.configs.enums import MemoryType
@@ -289,6 +291,7 @@ class Memory(MemoryBase):
         infer: bool = True,
         memory_type: Optional[str] = None,
         prompt: Optional[str] = None,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
     ):
         """
         Create a new memory.
@@ -311,7 +314,7 @@ class Memory(MemoryBase):
                 creating procedural memories (typically requires 'agent_id'). Otherwise, memories
                 are treated as general conversational/factual memories.memory_type (str, optional): Type of memory to create. Defaults to None. By default, it creates the short term memories and long term (semantic and episodic) memories. Pass "procedural_memory" to create procedural memories.
             prompt (str, optional): Prompt to use for the memory creation. Defaults to None.
-
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.   
 
         Returns:
             dict: A dictionary containing the result of the memory addition operation, typically
@@ -358,7 +361,7 @@ class Memory(MemoryBase):
             )
 
         if agent_id is not None and memory_type == MemoryType.PROCEDURAL.value:
-            results = self._create_procedural_memory(messages, metadata=processed_metadata, prompt=prompt)
+            results = self._create_procedural_memory(messages, metadata=processed_metadata, prompt=prompt, callbacks=callbacks)
             return results
 
         if self.config.llm.config.get("enable_vision"):
@@ -367,7 +370,7 @@ class Memory(MemoryBase):
             messages = parse_vision_messages(messages)
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future1 = executor.submit(self._add_to_vector_store, messages, processed_metadata, effective_filters, infer)
+            future1 = executor.submit(self._add_to_vector_store, messages, processed_metadata, effective_filters, infer, callbacks=callbacks)
             future2 = executor.submit(self._add_to_graph, messages, effective_filters)
 
             concurrent.futures.wait([future1, future2])
@@ -383,7 +386,7 @@ class Memory(MemoryBase):
 
         return {"results": vector_store_result}
 
-    def _add_to_vector_store(self, messages, metadata, filters, infer):
+    def _add_to_vector_store(self, messages, metadata, filters, infer, callbacks: Optional[List[BaseCallbackHandler]] = None):
         if not infer:
             returned_memories = []
             for message_dict in messages:
@@ -406,8 +409,9 @@ class Memory(MemoryBase):
                     per_msg_meta["actor_id"] = actor_name
 
                 msg_content = message_dict["content"]
-                msg_embeddings = self.embedding_model.embed(msg_content, "add")
-                mem_id = self._create_memory(msg_content, msg_embeddings, per_msg_meta)
+                # msg_embeddings = self.embedding_model.embed(msg_content, "add")
+                msg_embeddings = []
+                mem_id = self._create_memory(msg_content, msg_embeddings, per_msg_meta, callbacks=callbacks)
 
                 returned_memories.append(
                     {
@@ -437,6 +441,7 @@ class Memory(MemoryBase):
                 {"role": "user", "content": user_prompt},
             ],
             response_format={"type": "json_object"},
+            callbacks=callbacks,
         )
 
         try:
@@ -470,7 +475,7 @@ class Memory(MemoryBase):
         if filters.get("run_id"):
             search_filters["run_id"] = filters["run_id"]
         for new_mem in new_retrieved_facts:
-            messages_embeddings = self.embedding_model.embed(new_mem, "add")
+            messages_embeddings = self.embedding_model.embed(new_mem, "add", callbacks=callbacks)
             new_message_embeddings[new_mem] = messages_embeddings
             existing_memories = self.vector_store.search(
                 query=new_mem,
@@ -502,6 +507,7 @@ class Memory(MemoryBase):
                 response: str = self.llm.generate_response(
                     messages=[{"role": "user", "content": function_calling_prompt}],
                     response_format={"type": "json_object"},
+                    callbacks=callbacks,
                 )
             except Exception as e:
                 logger.error(f"Error in new memory actions response: {e}")
@@ -536,6 +542,7 @@ class Memory(MemoryBase):
                             data=action_text,
                             existing_embeddings=new_message_embeddings,
                             metadata=deepcopy(metadata),
+                            callbacks=callbacks,
                         )
                         returned_memories.append({"id": memory_id, "memory": action_text, "event": event_type})
                     elif event_type == "UPDATE":
@@ -544,6 +551,7 @@ class Memory(MemoryBase):
                             data=action_text,
                             existing_embeddings=new_message_embeddings,
                             metadata=deepcopy(metadata),
+                            callbacks=callbacks,
                         )
                         returned_memories.append(
                             {
@@ -766,6 +774,7 @@ class Memory(MemoryBase):
         filters: Optional[Dict[str, Any]] = None,
         threshold: Optional[float] = None,
         rerank: bool = True,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
     ):
         """
         Searches for memories based on a query
@@ -793,6 +802,8 @@ class Memory(MemoryBase):
                 - {"AND": [filter1, filter2]} - logical AND
                 - {"OR": [filter1, filter2]} - logical OR
                 - {"NOT": [filter1]} - logical NOT
+
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
 
         Returns:
             dict: A dictionary containing the search results, typically under a "results" key,
@@ -830,7 +841,7 @@ class Memory(MemoryBase):
         )
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_memories = executor.submit(self._search_vector_store, query, effective_filters, limit, threshold)
+            future_memories = executor.submit(self._search_vector_store, query, effective_filters, limit, threshold, callbacks=callbacks)
             future_graph_entities = (
                 executor.submit(self.graph.search, query, effective_filters, limit) if self.enable_graph else None
             )
@@ -951,8 +962,8 @@ class Memory(MemoryBase):
                 return True
         return False
 
-    def _search_vector_store(self, query, filters, limit, threshold: Optional[float] = None):
-        embeddings = self.embedding_model.embed(query, "search")
+    def _search_vector_store(self, query, filters, limit, threshold: Optional[float] = None, callbacks: Optional[List[BaseCallbackHandler]] = None):
+        embeddings = self.embedding_model.embed(query, "search", callbacks=callbacks)
         memories = self.vector_store.search(query=query, vectors=embeddings, limit=limit, filters=filters)
 
         promoted_payload_keys = [
@@ -989,13 +1000,14 @@ class Memory(MemoryBase):
 
         return original_memories
 
-    def update(self, memory_id, data):
+    def update(self, memory_id, data, callbacks: Optional[List[BaseCallbackHandler]] = None):
         """
         Update a memory by ID.
 
         Args:
             memory_id (str): ID of the memory to update.
             data (str): New content to update the memory with.
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
 
         Returns:
             dict: Success message indicating the memory was updated.
@@ -1006,9 +1018,9 @@ class Memory(MemoryBase):
         """
         capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "sync"})
 
-        existing_embeddings = {data: self.embedding_model.embed(data, "update")}
+        existing_embeddings = {data: self.embedding_model.embed(data, "update", callbacks=callbacks)}
 
-        self._update_memory(memory_id, data, existing_embeddings)
+        self._update_memory(memory_id, data, existing_embeddings, callbacks=callbacks)
         return {"message": "Memory updated successfully!"}
 
     def delete(self, memory_id):
@@ -1072,12 +1084,12 @@ class Memory(MemoryBase):
         capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "sync"})
         return self.db.get_history(memory_id)
 
-    def _create_memory(self, data, existing_embeddings, metadata=None):
+    def _create_memory(self, data, existing_embeddings, metadata=None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         logger.debug(f"Creating memory with {data=}")
         if data in existing_embeddings:
             embeddings = existing_embeddings[data]
         else:
-            embeddings = self.embedding_model.embed(data, memory_action="add")
+            embeddings = self.embedding_model.embed(data, memory_action="add", callbacks=callbacks)
         memory_id = str(uuid.uuid4())
         metadata = metadata or {}
         metadata["data"] = data
@@ -1100,7 +1112,7 @@ class Memory(MemoryBase):
         )
         return memory_id
 
-    def _create_procedural_memory(self, messages, metadata=None, prompt=None):
+    def _create_procedural_memory(self, messages, metadata=None, prompt=None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         """
         Create a procedural memory
 
@@ -1121,7 +1133,7 @@ class Memory(MemoryBase):
         ]
 
         try:
-            procedural_memory = self.llm.generate_response(messages=parsed_messages)
+            procedural_memory = self.llm.generate_response(messages=parsed_messages, callbacks=callbacks)
             procedural_memory = remove_code_blocks(procedural_memory)
         except Exception as e:
             logger.error(f"Error generating procedural memory summary: {e}")
@@ -1131,15 +1143,15 @@ class Memory(MemoryBase):
             raise ValueError("Metadata cannot be done for procedural memory.")
 
         metadata["memory_type"] = MemoryType.PROCEDURAL.value
-        embeddings = self.embedding_model.embed(procedural_memory, memory_action="add")
-        memory_id = self._create_memory(procedural_memory, {procedural_memory: embeddings}, metadata=metadata)
+        embeddings = self.embedding_model.embed(procedural_memory, memory_action="add", callbacks=callbacks)
+        memory_id = self._create_memory(procedural_memory, {procedural_memory: embeddings}, metadata=metadata, callbacks=callbacks)
         capture_event("mem0._create_procedural_memory", self, {"memory_id": memory_id, "sync_type": "sync"})
 
         result = {"results": [{"id": memory_id, "memory": procedural_memory, "event": "ADD"}]}
 
         return result
 
-    def _update_memory(self, memory_id, data, existing_embeddings, metadata=None):
+    def _update_memory(self, memory_id, data, existing_embeddings, metadata=None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         logger.info(f"Updating memory with {data=}")
 
         try:
@@ -1172,7 +1184,7 @@ class Memory(MemoryBase):
         if data in existing_embeddings:
             embeddings = existing_embeddings[data]
         else:
-            embeddings = self.embedding_model.embed(data, "update")
+            embeddings = self.embedding_model.embed(data, "update", callbacks=callbacks)
 
         self.vector_store.update(
             vector_id=memory_id,
@@ -1340,6 +1352,7 @@ class AsyncMemory(MemoryBase):
         memory_type: Optional[str] = None,
         prompt: Optional[str] = None,
         llm=None,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
     ):
         """
         Create a new memory asynchronously.
@@ -1355,6 +1368,7 @@ class AsyncMemory(MemoryBase):
                                          Pass "procedural_memory" to create procedural memories.
             prompt (str, optional): Prompt to use for the memory creation. Defaults to None.
             llm (BaseChatModel, optional): LLM class to use for generating procedural memories. Defaults to None. Useful when user is using LangChain ChatModel.
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
         Returns:
             dict: A dictionary containing the result of the memory addition operation.
         """
@@ -1383,7 +1397,7 @@ class AsyncMemory(MemoryBase):
 
         if agent_id is not None and memory_type == MemoryType.PROCEDURAL.value:
             results = await self._create_procedural_memory(
-                messages, metadata=processed_metadata, prompt=prompt, llm=llm
+                messages, metadata=processed_metadata, prompt=prompt, llm=llm, callbacks=callbacks
             )
             return results
 
@@ -1393,7 +1407,7 @@ class AsyncMemory(MemoryBase):
             messages = parse_vision_messages(messages)
 
         vector_store_task = asyncio.create_task(
-            self._add_to_vector_store(messages, processed_metadata, effective_filters, infer)
+            self._add_to_vector_store(messages, processed_metadata, effective_filters, infer, callbacks=callbacks)
         )
         graph_task = asyncio.create_task(self._add_to_graph(messages, effective_filters))
 
@@ -1413,6 +1427,7 @@ class AsyncMemory(MemoryBase):
         metadata: dict,
         effective_filters: dict,
         infer: bool,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
     ):
         if not infer:
             returned_memories = []
@@ -1436,8 +1451,9 @@ class AsyncMemory(MemoryBase):
                     per_msg_meta["actor_id"] = actor_name
 
                 msg_content = message_dict["content"]
-                msg_embeddings = await asyncio.to_thread(self.embedding_model.embed, msg_content, "add")
-                mem_id = await self._create_memory(msg_content, msg_embeddings, per_msg_meta)
+                # msg_embeddings = await asyncio.to_thread(self.embedding_model.embed, msg_content, "add")
+                msg_embeddings = []
+                mem_id = await self._create_memory(msg_content, msg_embeddings, per_msg_meta, callbacks=callbacks)
 
                 returned_memories.append(
                     {
@@ -1464,6 +1480,7 @@ class AsyncMemory(MemoryBase):
             self.llm.generate_response,
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             response_format={"type": "json_object"},
+            callbacks=callbacks,
         )
         try:
             response = remove_code_blocks(response)
@@ -1496,8 +1513,8 @@ class AsyncMemory(MemoryBase):
         if effective_filters.get("run_id"):
             search_filters["run_id"] = effective_filters["run_id"]
 
-        async def process_fact_for_search(new_mem_content):
-            embeddings = await asyncio.to_thread(self.embedding_model.embed, new_mem_content, "add")
+        async def process_fact_for_search(new_mem_content, callbacks: Optional[List[BaseCallbackHandler]] = None):
+            embeddings = await asyncio.to_thread(self.embedding_model.embed, new_mem_content, "add", callbacks=callbacks)
             new_message_embeddings[new_mem_content] = embeddings
             existing_mems = await asyncio.to_thread(
                 self.vector_store.search,
@@ -1508,7 +1525,7 @@ class AsyncMemory(MemoryBase):
             )
             return [{"id": mem.id, "text": mem.payload.get("data", "")} for mem in existing_mems]
 
-        search_tasks = [process_fact_for_search(fact) for fact in new_retrieved_facts]
+        search_tasks = [process_fact_for_search(fact, callbacks=callbacks) for fact in new_retrieved_facts]
         search_results_list = await asyncio.gather(*search_tasks)
         for result_group in search_results_list:
             retrieved_old_memory.extend(result_group)
@@ -1532,6 +1549,7 @@ class AsyncMemory(MemoryBase):
                     self.llm.generate_response,
                     messages=[{"role": "user", "content": function_calling_prompt}],
                     response_format={"type": "json_object"},
+                    callbacks=callbacks,
                 )
             except Exception as e:
                 logger.error(f"Error in new memory actions response: {e}")
@@ -1566,6 +1584,7 @@ class AsyncMemory(MemoryBase):
                                 data=action_text,
                                 existing_embeddings=new_message_embeddings,
                                 metadata=deepcopy(metadata),
+                                callbacks=callbacks,
                             )
                         )
                         memory_tasks.append((task, resp, "ADD", None))
@@ -1576,6 +1595,7 @@ class AsyncMemory(MemoryBase):
                                 data=action_text,
                                 existing_embeddings=new_message_embeddings,
                                 metadata=deepcopy(metadata),
+                                callbacks=callbacks,
                             )
                         )
                         memory_tasks.append((task, resp, "UPDATE", temp_uuid_mapping[resp["id"]]))
@@ -1816,6 +1836,7 @@ class AsyncMemory(MemoryBase):
         threshold: Optional[float] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         rerank: bool = True,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
     ):
         """
         Searches for memories based on a query
@@ -1843,6 +1864,8 @@ class AsyncMemory(MemoryBase):
                 - {"AND": [filter1, filter2]} - logical AND
                 - {"OR": [filter1, filter2]} - logical OR
                 - {"NOT": [filter1]} - logical NOT
+
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
 
         Returns:
             dict: A dictionary containing the search results, typically under a "results" key,
@@ -1880,7 +1903,7 @@ class AsyncMemory(MemoryBase):
             },
         )
 
-        vector_store_task = asyncio.create_task(self._search_vector_store(query, effective_filters, limit, threshold))
+        vector_store_task = asyncio.create_task(self._search_vector_store(query, effective_filters, limit, threshold, callbacks=callbacks))
 
         graph_task = None
         if self.enable_graph:
@@ -2007,8 +2030,8 @@ class AsyncMemory(MemoryBase):
                 return True
         return False
 
-    async def _search_vector_store(self, query, filters, limit, threshold: Optional[float] = None):
-        embeddings = await asyncio.to_thread(self.embedding_model.embed, query, "search")
+    async def _search_vector_store(self, query, filters, limit, threshold: Optional[float] = None, callbacks: Optional[List[BaseCallbackHandler]] = None):
+        embeddings = await asyncio.to_thread(self.embedding_model.embed, query, "search", callbacks=callbacks)
         memories = await asyncio.to_thread(
             self.vector_store.search, query=query, vectors=embeddings, limit=limit, filters=filters
         )
@@ -2047,14 +2070,14 @@ class AsyncMemory(MemoryBase):
 
         return original_memories
 
-    async def update(self, memory_id, data):
+    async def update(self, memory_id, data, callbacks: Optional[List[BaseCallbackHandler]] = None):
         """
         Update a memory by ID asynchronously.
 
         Args:
             memory_id (str): ID of the memory to update.
             data (str): New content to update the memory with.
-
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
         Returns:
             dict: Success message indicating the memory was updated.
 
@@ -2064,10 +2087,10 @@ class AsyncMemory(MemoryBase):
         """
         capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "async"})
 
-        embeddings = await asyncio.to_thread(self.embedding_model.embed, data, "update")
+        embeddings = await asyncio.to_thread(self.embedding_model.embed, data, "update", callbacks=callbacks)
         existing_embeddings = {data: embeddings}
 
-        await self._update_memory(memory_id, data, existing_embeddings)
+        await self._update_memory(memory_id, data, existing_embeddings, callbacks=callbacks)
         return {"message": "Memory updated successfully!"}
 
     async def delete(self, memory_id):
@@ -2133,12 +2156,12 @@ class AsyncMemory(MemoryBase):
         capture_event("mem0.history", self, {"memory_id": memory_id, "sync_type": "async"})
         return await asyncio.to_thread(self.db.get_history, memory_id)
 
-    async def _create_memory(self, data, existing_embeddings, metadata=None):
+    async def _create_memory(self, data, existing_embeddings, metadata=None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         logger.debug(f"Creating memory with {data=}")
         if data in existing_embeddings:
             embeddings = existing_embeddings[data]
         else:
-            embeddings = await asyncio.to_thread(self.embedding_model.embed, data, memory_action="add")
+            embeddings = await asyncio.to_thread(self.embedding_model.embed, data, memory_action="add", callbacks=callbacks)
 
         memory_id = str(uuid.uuid4())
         metadata = metadata or {}
@@ -2166,7 +2189,7 @@ class AsyncMemory(MemoryBase):
 
         return memory_id
 
-    async def _create_procedural_memory(self, messages, metadata=None, llm=None, prompt=None):
+    async def _create_procedural_memory(self, messages, metadata=None, llm=None, prompt=None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         """
         Create a procedural memory asynchronously
 
@@ -2175,6 +2198,7 @@ class AsyncMemory(MemoryBase):
             metadata (dict): Metadata to create a procedural memory from.
             llm (llm, optional): LLM to use for the procedural memory creation. Defaults to None.
             prompt (str, optional): Prompt to use for the procedural memory creation. Defaults to None.
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
         """
         try:
             from langchain_core.messages.utils import (
@@ -2200,7 +2224,7 @@ class AsyncMemory(MemoryBase):
                 response = await asyncio.to_thread(llm.invoke, input=parsed_messages)
                 procedural_memory = response.content
             else:
-                procedural_memory = await asyncio.to_thread(self.llm.generate_response, messages=parsed_messages)
+                procedural_memory = await asyncio.to_thread(self.llm.generate_response, messages=parsed_messages, callbacks=callbacks)
                 procedural_memory = remove_code_blocks(procedural_memory)
         
         except Exception as e:
@@ -2211,15 +2235,15 @@ class AsyncMemory(MemoryBase):
             raise ValueError("Metadata cannot be done for procedural memory.")
 
         metadata["memory_type"] = MemoryType.PROCEDURAL.value
-        embeddings = await asyncio.to_thread(self.embedding_model.embed, procedural_memory, memory_action="add")
-        memory_id = await self._create_memory(procedural_memory, {procedural_memory: embeddings}, metadata=metadata)
+        embeddings = await asyncio.to_thread(self.embedding_model.embed, procedural_memory, memory_action="add", callbacks=callbacks)
+        memory_id = await self._create_memory(procedural_memory, {procedural_memory: embeddings}, metadata=metadata, callbacks=callbacks)
         capture_event("mem0._create_procedural_memory", self, {"memory_id": memory_id, "sync_type": "async"})
 
         result = {"results": [{"id": memory_id, "memory": procedural_memory, "event": "ADD"}]}
 
         return result
 
-    async def _update_memory(self, memory_id, data, existing_embeddings, metadata=None):
+    async def _update_memory(self, memory_id, data, existing_embeddings, metadata=None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         logger.info(f"Updating memory with {data=}")
 
         try:
@@ -2253,7 +2277,7 @@ class AsyncMemory(MemoryBase):
         if data in existing_embeddings:
             embeddings = existing_embeddings[data]
         else:
-            embeddings = await asyncio.to_thread(self.embedding_model.embed, data, "update")
+            embeddings = await asyncio.to_thread(self.embedding_model.embed, data, "update", callbacks=callbacks)
 
         await asyncio.to_thread(
             self.vector_store.update,

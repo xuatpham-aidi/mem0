@@ -1,8 +1,11 @@
 import os
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import LLMResult, ChatGeneration
+from langchain_core.callbacks import BaseCallbackHandler
 
 from mem0.configs.embeddings.base import BaseEmbedderConfig
 from mem0.embeddings.base import EmbeddingBase
@@ -41,15 +44,46 @@ class AzureOpenAIEmbedding(EmbeddingBase):
             default_headers=default_headers,
         )
 
-    def embed(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None):
+    def embed(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         """
         Get the embedding for the given text using OpenAI.
 
         Args:
             text (str): The text to embed.
             memory_action (optional): The type of embedding to use. Must be one of "add", "search", or "update". Defaults to None.
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
         Returns:
             list: The embedding vector.
         """
         text = text.replace("\n", " ")
-        return self.client.embeddings.create(input=[text], model=self.config.model).data[0].embedding
+        response = self.client.embeddings.create(input=[text], model=self.config.model)
+
+        if response.usage:
+            token_usage = {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": 0,
+                "total_tokens": response.usage.total_tokens,
+            }
+            # print(f"Token usage: {token_usage}\t Model: {response.model}")
+            ai_message = AIMessage(
+                content="",
+                usage_metadata=token_usage,
+                response_metadata={
+                    "model_name": response.model,
+                },
+            )
+
+            if callbacks:
+                for cb in callbacks:
+                    if isinstance(cb, BaseCallbackHandler) and hasattr(cb, "on_llm_end"):
+                        cb.on_llm_end(
+                            LLMResult(
+                                generations=[[ChatGeneration(message=ai_message)]],
+                                llm_output={
+                                    "token_usage": token_usage,
+                                    "model_name": response.model,
+                                }
+                            )
+                        )
+
+        return response.data[0].embedding

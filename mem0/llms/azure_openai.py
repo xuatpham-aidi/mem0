@@ -4,6 +4,9 @@ from typing import Dict, List, Optional, Union
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import LLMResult, ChatGeneration
+from langchain_core.callbacks import BaseCallbackHandler
 
 from mem0.configs.llms.azure import AzureOpenAIConfig
 from mem0.configs.llms.base import BaseLlmConfig
@@ -103,6 +106,7 @@ class AzureOpenAILLM(LLMBase):
         response_format=None,
         tools: Optional[List[Dict]] = None,
         tool_choice: str = "auto",
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
         **kwargs,
     ):
         """
@@ -113,6 +117,7 @@ class AzureOpenAILLM(LLMBase):
             response_format (str or object, optional): Format of the response. Defaults to "text".
             tools (list, optional): List of tools that the model can call. Defaults to None.
             tool_choice (str, optional): Tool choice method. Defaults to "auto".
+            callbacks (list[BaseCallbackHandler], optional): List of callback handlers. Defaults to None.
             **kwargs: Additional Azure OpenAI-specific parameters.
 
         Returns:
@@ -138,4 +143,32 @@ class AzureOpenAILLM(LLMBase):
             params["tool_choice"] = tool_choice
 
         response = self.client.chat.completions.create(**params)
+        if response.usage:
+            token_usage = {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+            # print(f"Token usage: {token_usage}\t Model: {response.model}")
+            ai_message = AIMessage(
+                content="",
+                usage_metadata=token_usage,
+                response_metadata={
+                    "model_name": response.model,
+                },
+            )
+
+            if callbacks:
+                for cb in callbacks:
+                    if isinstance(cb, BaseCallbackHandler) and hasattr(cb, "on_llm_end"):
+                        cb.on_llm_end(
+                            LLMResult(
+                                generations=[[ChatGeneration(message=ai_message)]],
+                                llm_output={
+                                    "token_usage": token_usage,
+                                    "model_name": response.model,
+                                }
+                            )
+                        )
+                
         return self._parse_response(response, tools)

@@ -24,6 +24,7 @@ dependencies = [
     "azure-core>=1.38.0",
     "azure-identity>=1.25.1",
     "azure-search-documents==11.5.2",
+    "langchain-core>=0.3.83",
 ]
 
 [project.optional-dependencies]

@@ -148,19 +148,6 @@ class AzureAISearch(VectorStoreBase):
 
         payload_fields = []
         if self.payload_filter_config:
-            # for field_config in self.payload_filter_config:
-            #     name = field_config.get("name")
-            #     type_str = field_config.get("type", "String").lower()
-            #     filterable = field_config.get("filterable", False)
-            #     searchable = field_config.get("searchable", False)
-            #     if type_str in str_2_type:
-            #         field_type = str_2_type[type_str]
-            #     else:
-            #         continue  # Skip unsupported types
-            #     payload_fields.append(
-            #         SimpleField(name=name, type=field_type, filterable=filterable)
-            #     )
-
             for field_name, field_config in self.payload_filter_config.items():
                 if field_config.get("searchable", False):
                     payload_fields.append(
@@ -222,11 +209,6 @@ class AzureAISearch(VectorStoreBase):
             if field_name in payload:
                 document["metadata"][field_name] = payload[field_name]
 
-        # for field in self.payload_filter_config:
-        #     field_name = field.get("name")
-        #     if field_name and field_name in payload:
-        #         document["metadata"][field_name] = payload[field_name]
-
         return document
 
     # Note: Explicit "insert" calls may later be decoupled from memory management decisions.
@@ -254,7 +236,6 @@ class AzureAISearch(VectorStoreBase):
 
     def _build_filter_expression(self, filters):
         filter_conditions = []
-        # field_types = {field.get("name"): field.get("type") for field in self.payload_filter_config}
         field_types = {field_name: field_config.get("type", "string").lower() for field_name, field_config in self.payload_filter_config.items()}
         for key, value in filters.items():
             safe_key = self._sanitize_key(key)
@@ -263,13 +244,11 @@ class AzureAISearch(VectorStoreBase):
             if isinstance(value, str):
                 safe_value = value.replace("'", "''")
                 if field_types.get(key, "").lower().startswith("collection(string)"):
-                    # condition = f"{safe_key}/any(t: t eq '{safe_value}')"
                     condition = f"{safe_key}/any(t: search.in(t, '{safe_value}'))"
                 else:
                     condition = f"{safe_key} eq '{safe_value}'"
             else:
                 if field_types.get(key, "").lower().startswith("collection(string)"):
-                    # condition = f"{safe_key}/any(t: t eq {value})"
                     condition = f"{safe_key}/any(t: search.in(t, {value}))"
                 else:
                     condition = f"{safe_key} eq {value}"

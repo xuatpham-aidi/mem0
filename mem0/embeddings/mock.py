@@ -1,10 +1,11 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 from mem0.embeddings.base import EmbeddingBase
 
+from langchain_core.callbacks import BaseCallbackHandler
 
 class MockEmbeddings(EmbeddingBase):
-    def embed(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None):
+    def embed(self, text, memory_action: Optional[Literal["add", "search", "update"]] = None, callbacks: Optional[List[BaseCallbackHandler]] = None):
         """
         Generate a mock embedding with dimension of 10.
         """
