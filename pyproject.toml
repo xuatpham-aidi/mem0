@@ -21,7 +21,7 @@ dependencies = [
     "pytz>=2024.1",
     "sqlalchemy>=2.0.31",
     "protobuf>=5.29.0,<6.0.0",
-    "azure-core>=1.38.0",
+    "azure-core==1.29.0",
     "azure-identity==1.15.0",
     "azure-search-documents==11.6.0",
     "langchain-core>=0.3.83",
