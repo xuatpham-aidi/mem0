@@ -238,11 +238,16 @@ class AzureAISearch(VectorStoreBase):
 
     def _build_filter_expression(self, filters):
         filter_conditions = []
-        field_types = {field_name: field_config.get("type", "string").lower() for field_name, field_config in self.payload_filter_config.items()}
+        field_types = {}
+        if self.payload_filter_config:
+            field_types = {field_name: field_config.get("type", "string").lower() for field_name, field_config in self.payload_filter_config.items()}
+        
         for key, value in filters.items():
             safe_key = self._sanitize_key(key)
             if safe_key in field_types:
                 safe_key = f"metadata/{safe_key}"
+            elif safe_key not in ["user_id", "run_id", "agent_id"]:
+                continue
             if isinstance(value, str):
                 safe_value = value.replace("'", "''")
                 if field_types.get(key, "").lower().startswith("collection(string)"):
