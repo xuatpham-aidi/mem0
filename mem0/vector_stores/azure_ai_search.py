@@ -180,8 +180,10 @@ class AzureAISearch(VectorStoreBase):
                 vector_search_profile_name="my-vector-config",
             ),
             SearchField(name="payload", type=SearchFieldDataType.String, searchable=True),
-            ComplexField(name="metadata", fields=payload_fields)
         ]
+
+        if self.payload_filter_config:
+            fields.append(ComplexField(name="metadata", fields=payload_fields))
 
         vector_search = VectorSearch(
             profiles=[
