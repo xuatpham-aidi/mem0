@@ -6,7 +6,7 @@ from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from openai import AzureOpenAI
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult, ChatGeneration
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks import BaseCallbackHandler, UsageMetadataCallbackHandler 
 
 from mem0.configs.llms.azure import AzureOpenAIConfig
 from mem0.configs.llms.base import BaseLlmConfig
@@ -160,7 +160,9 @@ class AzureOpenAILLM(LLMBase):
 
             if callbacks:
                 for cb in callbacks:
-                    if isinstance(cb, BaseCallbackHandler) and hasattr(cb, "on_llm_end"):
+                    if isinstance(cb, UsageMetadataCallbackHandler) and hasattr(cb, "on_llm_end"):
+                        print(f"Callback: {cb}")
+                        print(f"Callbacks: {type(cb)}")
                         cb.on_llm_end(
                             LLMResult(
                                 generations=[[ChatGeneration(message=ai_message)]],
