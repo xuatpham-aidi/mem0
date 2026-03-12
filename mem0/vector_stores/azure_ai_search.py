@@ -140,6 +140,7 @@ class AzureAISearch(VectorStoreBase):
             "int": SearchFieldDataType.Int32,
             "double": SearchFieldDataType.Double,
             "boolean": SearchFieldDataType.Boolean,
+            "datetime": SearchFieldDataType.DateTimeOffset,
             "collection(string)": SearchFieldDataType.Collection(SearchFieldDataType.String),
             "collection(int)": SearchFieldDataType.Collection(SearchFieldDataType.Int32),
             "collection(double)": SearchFieldDataType.Collection(SearchFieldDataType.Double),
