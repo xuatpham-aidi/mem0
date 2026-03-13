@@ -447,24 +447,23 @@ class AzureAISearch(VectorStoreBase):
         index = self.index_client.get_index(self.index_name)
         return {"name": index.name, "fields": index.fields}
 
-    def list(self, filters=None, limit=100, query=None):
+    def list(self, filters=None, limit=100, query_order_by=None):
         """
         List all vectors in the index.
 
         Args:
             filters (dict, optional): Filters to apply to the list.
             limit (int, optional): Number of vectors to return. Defaults to 100.
-            query (str, optional): Query to search for. Defaults to None.
+            query_order_by (str, optional): Order by query. Defaults to None.
+
         Returns:
             List[OutputData]: List of vectors.
         """
         filter_expression = None
-        if query:
-            filter_expression = query
-        elif filters:
+        if filters:
             filter_expression = self._build_filter_expression(filters)
 
-        search_results = self.search_client.search(search_text="*", filter=filter_expression, top=limit)
+        search_results = self.search_client.search(search_text="*", filter=filter_expression, top=limit, order_by=query_order_by)
         results = []
         for result in search_results:
             payload = json.loads(extract_json(result["payload"]))
