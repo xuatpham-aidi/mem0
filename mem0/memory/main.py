@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, List
 import pytz
 from pydantic import ValidationError
 
-from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.callbacks import BaseCallbackHandler, UsageMetadataCallbackHandler
 
 from mem0.configs.base import MemoryConfig, MemoryItem
 from mem0.configs.enums import MemoryType
@@ -360,8 +360,13 @@ class Memory(MemoryBase):
                 suggestion="Convert your input to a string, dictionary, or list of dictionaries."
             )
 
+        if callbacks is None:
+            callbacks = []
+
+        message_usage_callback = UsageMetadataCallbackHandler()
+
         if agent_id is not None and memory_type == MemoryType.PROCEDURAL.value:
-            results = self._create_procedural_memory(messages, metadata=processed_metadata, prompt=prompt, callbacks=callbacks)
+            results = self._create_procedural_memory(messages, metadata=processed_metadata, prompt=prompt, callbacks=[*callbacks, message_usage_callback])
             return results
 
         if self.config.llm.config.get("enable_vision"):
@@ -370,7 +375,7 @@ class Memory(MemoryBase):
             messages = parse_vision_messages(messages)
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future1 = executor.submit(self._add_to_vector_store, messages, processed_metadata, effective_filters, infer, callbacks=callbacks)
+            future1 = executor.submit(self._add_to_vector_store, messages, processed_metadata, effective_filters, infer, callbacks=[*callbacks, message_usage_callback])
             future2 = executor.submit(self._add_to_graph, messages, effective_filters)
 
             concurrent.futures.wait([future1, future2])
@@ -1018,9 +1023,14 @@ class Memory(MemoryBase):
         """
         capture_event("mem0.update", self, {"memory_id": memory_id, "sync_type": "sync"})
 
-        existing_embeddings = {data: self.embedding_model.embed(data, "update", callbacks=callbacks)}
+        if callbacks is None:
+            callbacks = []
 
-        self._update_memory(memory_id, data, existing_embeddings, callbacks=callbacks)
+        message_usage_callback = UsageMetadataCallbackHandler()
+
+        existing_embeddings = {data: self.embedding_model.embed(data, "update", callbacks=[*callbacks, message_usage_callback])}
+
+        self._update_memory(memory_id, data, existing_embeddings, callbacks=[*callbacks, message_usage_callback])
         return {"message": "Memory updated successfully!"}
 
     def delete(self, memory_id):
@@ -1095,6 +1105,8 @@ class Memory(MemoryBase):
         metadata["data"] = data
         metadata["hash"] = hashlib.md5(data.encode()).hexdigest()
         metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).isoformat()
+        if callbacks and len(callbacks) > 0 and isinstance(callbacks[-1], UsageMetadataCallbackHandler):
+            metadata["usage"] = callbacks[-1].usage_metadata
 
         self.vector_store.insert(
             vectors=[embeddings],
@@ -1394,10 +1406,12 @@ class AsyncMemory(MemoryBase):
                 details={"provided_type": type(messages).__name__, "valid_types": ["str", "dict", "list[dict]"]},
                 suggestion="Convert your input to a string, dictionary, or list of dictionaries."
             )
-
+        message_usage_callback = UsageMetadataCallbackHandler()
+        if callbacks is None:
+            callbacks = []
         if agent_id is not None and memory_type == MemoryType.PROCEDURAL.value:
             results = await self._create_procedural_memory(
-                messages, metadata=processed_metadata, prompt=prompt, llm=llm, callbacks=callbacks
+                messages, metadata=processed_metadata, prompt=prompt, llm=llm, callbacks=[*callbacks, message_usage_callback]
             )
             return results
 
@@ -1407,7 +1421,7 @@ class AsyncMemory(MemoryBase):
             messages = parse_vision_messages(messages)
 
         vector_store_task = asyncio.create_task(
-            self._add_to_vector_store(messages, processed_metadata, effective_filters, infer, callbacks=callbacks)
+            self._add_to_vector_store(messages, processed_metadata, effective_filters, infer, callbacks=[*callbacks, message_usage_callback])
         )
         graph_task = asyncio.create_task(self._add_to_graph(messages, effective_filters))
 
@@ -2168,7 +2182,9 @@ class AsyncMemory(MemoryBase):
         metadata["data"] = data
         metadata["hash"] = hashlib.md5(data.encode()).hexdigest()
         metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).isoformat()
-
+        if callbacks and len(callbacks) > 0 and isinstance(callbacks[-1], UsageMetadataCallbackHandler):
+            metadata["usage"] = callbacks[-1].usage_metadata
+        
         await asyncio.to_thread(
             self.vector_store.insert,
             vectors=[embeddings],

@@ -147,9 +147,37 @@ class AzureAISearch(VectorStoreBase):
             "collection(boolean)": SearchFieldDataType.Collection(SearchFieldDataType.Boolean),
         }
 
+        usage_field = ComplexField(
+            name="usage",
+            collection=True,
+            fields=[
+                SimpleField(
+                    name="model_name", 
+                    type=SearchFieldDataType.String, 
+                    filterable=True
+                ),
+                SimpleField(
+                    name="input_tokens", 
+                    type=SearchFieldDataType.Int32, 
+                    filterable=True
+                ),
+                SimpleField(
+                    name="output_tokens", 
+                    type=SearchFieldDataType.Int32, 
+                    filterable=True
+                ),
+                SimpleField(
+                    name="total_tokens", 
+                    type=SearchFieldDataType.Int32, 
+                    filterable=True, sortable=False
+                ),
+            ]
+        )
+
         payload_fields = []
         if self.payload_filter_config:
             for field_name, field_config in self.payload_filter_config.items():
+                sortable = field_config.get("sortable", False)
                 if field_config.get("searchable", False):
                     payload_fields.append(
                         SearchField(
@@ -157,6 +185,7 @@ class AzureAISearch(VectorStoreBase):
                             type=str_2_type.get(field_config.get("type", "string").lower(), SearchFieldDataType.String),
                             filterable=field_config.get("filterable", False),
                             searchable=True,
+                            sortable=sortable,
                         )
                     )
                 else:
@@ -165,6 +194,7 @@ class AzureAISearch(VectorStoreBase):
                             name=field_name,
                             type=str_2_type.get(field_config.get("type", "string").lower(), SearchFieldDataType.String),
                             filterable=field_config.get("filterable", False),
+                            sortable=sortable,
                         )
                     )
 
@@ -181,6 +211,7 @@ class AzureAISearch(VectorStoreBase):
                 vector_search_profile_name="my-vector-config",
             ),
             SearchField(name="payload", type=SearchFieldDataType.String, searchable=True),
+            usage_field
         ]
 
         if self.payload_filter_config:
@@ -211,6 +242,19 @@ class AzureAISearch(VectorStoreBase):
         for field_name, _ in self.payload_filter_config.items():
             if field_name in payload:
                 document["metadata"][field_name] = payload[field_name]
+
+        if "usage" in payload:
+            document['usage'] = []
+            for model_name, model_usage in payload["usage"].items():
+                document['usage'].append({
+                    "model_name": model_name,
+                    "input_tokens": model_usage["input_tokens"],
+                    "output_tokens": model_usage["output_tokens"],
+                    "total_tokens": model_usage["total_tokens"],
+                })
+
+        if "updated_at" in payload and payload["updated_at"] is not None:
+            document["metadata"]["created_at"] = payload["updated_at"]
 
         return document
 
@@ -339,6 +383,20 @@ class AzureAISearch(VectorStoreBase):
             for field_name, field_config in self.payload_filter_config.items():
                 if field_name and field_name in payload:
                     document["metadata"][field_name] = payload[field_name]
+
+            if "updated_at" in payload and payload["updated_at"] is not None:
+                document["metadata"]["updated_at"] = payload["updated_at"]
+
+            if "usage" in payload:
+                document['usage'] = []
+                for model_name, model_usage in payload["usage"].items():
+                    document['usage'].append({
+                        "model_name": model_name,
+                        "input_tokens": model_usage["input_tokens"],
+                        "output_tokens": model_usage["output_tokens"],
+                        "total_tokens": model_usage["total_tokens"],
+                    })
+                    
         response = self.search_client.merge_or_upload_documents(documents=[document])
         for doc in response:
             if not hasattr(doc, "status_code") and doc.get("status_code") != 200:

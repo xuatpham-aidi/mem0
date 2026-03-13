@@ -161,8 +161,6 @@ class AzureOpenAILLM(LLMBase):
             if callbacks:
                 for cb in callbacks:
                     if isinstance(cb, UsageMetadataCallbackHandler) and hasattr(cb, "on_llm_end"):
-                        print(f"Callback: {cb}")
-                        print(f"Callbacks: {type(cb)}")
                         cb.on_llm_end(
                             LLMResult(
                                 generations=[[ChatGeneration(message=ai_message)]],
@@ -172,5 +170,6 @@ class AzureOpenAILLM(LLMBase):
                                 }
                             )
                         )
+                        # print(f"Callback: {cb}")
                 
         return self._parse_response(response, tools)
