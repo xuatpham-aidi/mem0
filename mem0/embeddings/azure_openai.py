@@ -85,5 +85,6 @@ class AzureOpenAIEmbedding(EmbeddingBase):
                                 }
                             )
                         )
+                        # print(f"Embedding Callback: {cb}")
 
         return response.data[0].embedding
