@@ -671,7 +671,7 @@ class Memory(MemoryBase):
         run_id: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        query: Optional[str] = None,
+        query_order_by: Optional[str] = None,
     ):
         """
         List all memories.
@@ -684,7 +684,7 @@ class Memory(MemoryBase):
                 These are merged with the ID-based scoping filters. For example,
                 `filters={"actor_id": "some_user"}`.
             limit (int, optional): The maximum number of memories to return. Defaults to 100.
-            query (str, optional): Query to search for. Defaults to None.
+            query_order_by (str, optional): Order by query. Defaults to None.
 
         Returns:
             dict: A dictionary containing a list of memories under the "results" key,
@@ -706,7 +706,7 @@ class Memory(MemoryBase):
         )
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_memories = executor.submit(self._get_all_from_vector_store, effective_filters, limit, query)
+            future_memories = executor.submit(self._get_all_from_vector_store, effective_filters, limit, query_order_by)
             future_graph_entities = (
                 executor.submit(self.graph.get_all, effective_filters, limit) if self.enable_graph else None
             )
@@ -723,8 +723,8 @@ class Memory(MemoryBase):
 
         return {"results": all_memories_result}
 
-    def _get_all_from_vector_store(self, filters, limit, query=None):
-        memories_result = self.vector_store.list(filters=filters, limit=limit, query=query)
+    def _get_all_from_vector_store(self, filters, limit, query_order_by=None):
+        memories_result = self.vector_store.list(filters=filters, limit=limit, query_order_by=query_order_by)
 
         # Handle different vector store return formats by inspecting first element
         if isinstance(memories_result, (tuple, list)) and len(memories_result) > 0:
@@ -1738,7 +1738,7 @@ class AsyncMemory(MemoryBase):
         run_id: Optional[str] = None,
         filters: Optional[Dict[str, Any]] = None,
         limit: int = 100,
-        query: Optional[str] = None,
+        query_order_by: Optional[str] = None,
     ):
         """
         List all memories.
@@ -1751,7 +1751,7 @@ class AsyncMemory(MemoryBase):
                  These are merged with the ID-based scoping filters. For example,
                  `filters={"actor_id": "some_user"}`.
              limit (int, optional): The maximum number of memories to return. Defaults to 100.
-             query (str, optional): Query to search for. Defaults to None.
+             query_order_by (str, optional): Order by query. Defaults to None.
          Returns:
              dict: A dictionary containing a list of memories under the "results" key,
                    and potentially "relations" if graph store is enabled. For API v1.0,
@@ -1774,7 +1774,7 @@ class AsyncMemory(MemoryBase):
             "mem0.get_all", self, {"limit": limit, "keys": keys, "encoded_ids": encoded_ids, "sync_type": "async"}
         )
 
-        vector_store_task = asyncio.create_task(self._get_all_from_vector_store(effective_filters, limit, query))
+        vector_store_task = asyncio.create_task(self._get_all_from_vector_store(effective_filters, limit, query_order_by))
 
         graph_task = None
         if self.enable_graph:
@@ -1794,8 +1794,8 @@ class AsyncMemory(MemoryBase):
 
         return results_dict
 
-    async def _get_all_from_vector_store(self, filters, limit, query=None):
-        memories_result = await asyncio.to_thread(self.vector_store.list, filters=filters, limit=limit, query=query)
+    async def _get_all_from_vector_store(self, filters, limit, query_order_by=None):
+        memories_result = await asyncio.to_thread(self.vector_store.list, filters=filters, limit=limit, query_order_by=query_order_by)
 
         # Handle different vector store return formats by inspecting first element
         if isinstance(memories_result, (tuple, list)) and len(memories_result) > 0:
