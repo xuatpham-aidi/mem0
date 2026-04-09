@@ -251,16 +251,15 @@ wheels = [
 
 [[package]]
 name = "azure-core"
-version = "1.29.0"
+version = "1.39.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
-    { name = "six" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e7/b6/71a64ffe27d141972b0611341f37358f0e5eb71e38e4115521b8e668121e/azure-core-1.29.0.zip", hash = "sha256:552b2010983ab3d3d35e4d4bcc7bb24fc98e40fe70fe534f5700dc90831e2396", size = 388883, upload-time = "2023-08-08T20:12:13.056Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/83/bbde3faa84ddcb8eb0eca4b3ffb3221252281db4ce351300fe248c5c70b1/azure_core-1.39.0.tar.gz", hash = "sha256:8a90a562998dd44ce84597590fff6249701b98c0e8797c95fcdd695b54c35d74", size = 367531, upload-time = "2026-03-19T01:31:29.461Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/13/74/a6dc1d5192ac88c65605be9442aae2b5b7bdd07c81b89f82562b36600d9d/azure_core-1.29.0-py3-none-any.whl", hash = "sha256:b591cada3644523ae61fd8f120e14e2486ac70485206355db49d7de36709303a", size = 188397, upload-time = "2023-08-08T20:12:16.542Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/d6/8ebcd05b01a580f086ac9a97fb9fac65c09a4b012161cc97c21a336e880b/azure_core-1.39.0-py3-none-any.whl", hash = "sha256:4ac7b70fab5438c3f68770649a78daf97833caa83827f91df9c14e0e0ea7d34f", size = 218318, upload-time = "2026-03-19T01:31:31.25Z" },
 ]
 
 [[package]]
@@ -3453,7 +3452,7 @@ vector-stores = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-core", specifier = "==1.29.0" },
+    { name = "azure-core", specifier = ">=1.30.0" },
     { name = "azure-identity", specifier = "==1.15.0" },
     { name = "azure-identity", marker = "extra == 'vector-stores'", specifier = "==1.15.0" },
     { name = "azure-search-documents", specifier = "==11.6.0" },
